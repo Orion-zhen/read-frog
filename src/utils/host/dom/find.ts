@@ -60,6 +60,89 @@ function findElementAt(root: Document | ShadowRoot, point: Point): Element | nul
   return findDeepestElement(initialElement)
 }
 
+function isTextNode(node: Node | null): node is Text {
+  return node?.nodeType === Node.TEXT_NODE
+}
+
+function isPointInsideRect(point: Point, rect: DOMRect | DOMRectReadOnly): boolean {
+  return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom
+}
+
+function isPointInsideTextRange(point: Point, node: Text, startOffset: number, endOffset: number): boolean {
+  if (!node.textContent?.slice(startOffset, endOffset).trim())
+    return false
+
+  const range = document.createRange()
+  range.setStart(node, startOffset)
+  range.setEnd(node, endOffset)
+
+  if (typeof range.getClientRects !== "function")
+    return false
+
+  for (const rect of range.getClientRects()) {
+    if (isPointInsideRect(point, rect))
+      return true
+  }
+
+  return false
+}
+
+function findCaretTextNodeAtPoint(point: Point): Text | null {
+  const documentWithCaretPosition = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node, offset: number } | null
+  }
+  const caretPosition = documentWithCaretPosition.caretPositionFromPoint?.(point.x, point.y)
+  if (caretPosition && isTextNode(caretPosition.offsetNode)) {
+    const text = caretPosition.offsetNode.textContent ?? ""
+    const offsets = [
+      caretPosition.offset,
+      caretPosition.offset - 1,
+    ].filter(offset => offset >= 0 && offset < text.length)
+
+    for (const offset of offsets) {
+      if (isPointInsideTextRange(point, caretPosition.offsetNode, offset, offset + 1))
+        return caretPosition.offsetNode
+    }
+  }
+
+  return null
+}
+
+function findTextNodeByRangeRectsAtPoint(point: Point): Text | null {
+  const element = findElementAt(document, point)
+  if (!element)
+    return null
+
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+  let currentNode = walker.nextNode()
+
+  while (currentNode) {
+    if (isTextNode(currentNode)) {
+      const text = currentNode.textContent ?? ""
+      for (let offset = 0; offset < text.length; offset++) {
+        if (isPointInsideTextRange(point, currentNode, offset, offset + 1))
+          return currentNode
+      }
+    }
+
+    currentNode = walker.nextNode()
+  }
+
+  return null
+}
+
+/**
+ * Returns true only when the viewport point is over rendered text.
+ *
+ * Element-level hit testing is not enough for node translation: blank areas of
+ * large containers such as body/main can otherwise resolve to a block node and
+ * translate the whole page. Text range rects keep the trigger tied to actual
+ * glyph boxes.
+ */
+export function isPointOverText(point: Point): boolean {
+  return findCaretTextNodeAtPoint(point) !== null || findTextNodeByRangeRectsAtPoint(point) !== null
+}
+
 export function findNearestAncestorBlockNodeFor(element: Element) {
   const startElement = element.closest(`.${CONTENT_WRAPPER_CLASS}`)?.parentElement || element
   let currentNode = startElement

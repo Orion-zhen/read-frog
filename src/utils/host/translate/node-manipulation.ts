@@ -2,7 +2,7 @@ import type { Config } from "@/types/config/config"
 import type { Point } from "@/types/dom"
 import { getRandomUUID } from "@/utils/crypto-polyfill"
 import { isHTMLElement } from "../dom/filter"
-import { findNearestAncestorBlockNodeAt } from "../dom/find"
+import { findNearestAncestorBlockNodeAt, isPointOverText } from "../dom/find"
 import { walkAndLabelElement } from "../dom/traversal"
 import { translateWalkedElement } from "./core/translation-walker"
 import { validateTranslationConfigAndToast } from "./translate-text"
@@ -14,6 +14,9 @@ export { removeAllTranslatedWrapperNodes } from "./dom/translation-cleanup"
 
 // High-level orchestration function
 export async function removeOrShowNodeTranslation(point: Point, config: Config): Promise<boolean> {
+  if (!isPointOverText(point))
+    return false
+
   const node = findNearestAncestorBlockNodeAt(point)
 
   if (!node || !isHTMLElement(node))

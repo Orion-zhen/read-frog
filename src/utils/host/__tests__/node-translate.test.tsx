@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { Config } from "@/types/config/config"
 import { act, render, screen } from "@testing-library/react"
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { DEFAULT_CONFIG } from "@/utils/constants/config"
 import { BLOCK_ATTRIBUTE, BLOCK_CONTENT_CLASS, CONTENT_WRAPPER_CLASS, PARAGRAPH_ATTRIBUTE } from "@/utils/constants/dom-labels"
 import { flushBatchedOperations } from "../dom/batch-dom"
@@ -35,6 +35,42 @@ vi.mock("@/utils/config/languages", () => ({
 
 describe("node translation", () => {
   const originalGetComputedStyle = window.getComputedStyle
+  const originalCreateRange = document.createRange
+  const documentWithCaretPosition = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node, offset: number } | null
+  }
+  const originalCaretPositionFromPoint = documentWithCaretPosition.caretPositionFromPoint
+
+  function mockTextHit(textNode: Text) {
+    documentWithCaretPosition.caretPositionFromPoint = vi.fn(() => ({
+      offsetNode: textNode,
+      offset: 1,
+      getClientRect: () => null,
+    }))
+    document.createRange = vi.fn(() => {
+      const range = originalCreateRange.call(document)
+      range.getClientRects = vi.fn(() => [{
+        left: 100,
+        top: 100,
+        right: 200,
+        bottom: 150,
+        width: 100,
+        height: 50,
+        x: 100,
+        y: 100,
+        toJSON: () => ({}),
+      }] as unknown as DOMRectList)
+      return range
+    })
+  }
+
+  function getFirstTextNode(element: Element): Text {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+    const textNode = walker.nextNode()
+    if (!textNode)
+      throw new Error("Expected element to contain a text node")
+    return textNode as Text
+  }
 
   beforeAll(async () => {
     // Mock getLocalConfig to return TEST_CONFIG with bilingual mode
@@ -55,8 +91,15 @@ describe("node translation", () => {
     })
   })
 
+  afterEach(() => {
+    document.createRange = originalCreateRange
+    documentWithCaretPosition.caretPositionFromPoint = originalCaretPositionFromPoint
+  })
+
   afterAll(() => {
     window.getComputedStyle = originalGetComputedStyle
+    document.createRange = originalCreateRange
+    documentWithCaretPosition.caretPositionFromPoint = originalCaretPositionFromPoint
   })
   describe("show translation", () => {
     it("should show the translation when point is over the original text", async () => {
@@ -66,6 +109,7 @@ describe("node translation", () => {
         </div>,
       )
       const node = screen.getByTestId("test-node")
+      mockTextHit(node.firstChild as Text)
       const originalElementFromPoint = document.elementFromPoint
       document.elementFromPoint = vi.fn(() => node)
       await act(async () => {
@@ -81,6 +125,29 @@ describe("node translation", () => {
 
       document.elementFromPoint = originalElementFromPoint
     })
+
+    it("should not show the translation when point is not over text", async () => {
+      render(
+        <div data-testid="test-node">
+          {MOCK_ORIGINAL_TEXT}
+        </div>,
+      )
+      const node = screen.getByTestId("test-node")
+      const originalElementFromPoint = document.elementFromPoint
+      document.elementFromPoint = vi.fn(() => node)
+      documentWithCaretPosition.caretPositionFromPoint = vi.fn(() => null)
+
+      let didTranslate = true
+      await act(async () => {
+        didTranslate = await removeOrShowNodeTranslation({ x: 150, y: 125 }, TEST_CONFIG)
+        flushBatchedOperations()
+      })
+
+      expect(didTranslate).toBe(false)
+      expect(node.querySelector(`.${CONTENT_WRAPPER_CLASS}`)).toBeFalsy()
+
+      document.elementFromPoint = originalElementFromPoint
+    })
   })
   describe("hide translation", () => {
     it("should hide the translation when point is over the translation content node", async () => {
@@ -90,6 +157,7 @@ describe("node translation", () => {
         </div>,
       )
       const node = screen.getByTestId("test-node")
+      mockTextHit(node.firstChild as Text)
 
       const originalElementFromPoint = document.elementFromPoint
       document.elementFromPoint = vi.fn(() => node)
@@ -99,6 +167,7 @@ describe("node translation", () => {
       })
 
       const translatedContent = node.querySelector(`.${BLOCK_CONTENT_CLASS}`)
+      mockTextHit(translatedContent?.firstChild as Text)
       document.elementFromPoint = vi.fn(() => translatedContent as Element)
       await act(async () => {
         await removeOrShowNodeTranslation({ x: 150, y: 125 }, TEST_CONFIG)
@@ -117,6 +186,7 @@ describe("node translation", () => {
         </div>,
       )
       const node = screen.getByTestId("test-node")
+      mockTextHit(node.firstChild as Text)
       const originalElementFromPoint = document.elementFromPoint
       document.elementFromPoint = vi.fn(() => node)
       await act(async () => {
@@ -124,6 +194,7 @@ describe("node translation", () => {
         flushBatchedOperations()
       })
       const wrapper = node.querySelector(`.${CONTENT_WRAPPER_CLASS}`)
+      mockTextHit(getFirstTextNode(wrapper as Element))
       document.elementFromPoint = vi.fn(() => wrapper as Element)
       await act(async () => {
         await removeOrShowNodeTranslation({ x: 150, y: 125 }, TEST_CONFIG)
