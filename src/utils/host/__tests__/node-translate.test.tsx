@@ -35,7 +35,6 @@ vi.mock("@/utils/config/languages", () => ({
 
 describe("node translation", () => {
   const originalGetComputedStyle = window.getComputedStyle
-  const originalCreateRange = document.createRange
   const documentWithCaretPosition = document as Document & {
     caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node, offset: number } | null
   }
@@ -47,21 +46,6 @@ describe("node translation", () => {
       offset: 1,
       getClientRect: () => null,
     }))
-    document.createRange = vi.fn(() => {
-      const range = originalCreateRange.call(document)
-      range.getClientRects = vi.fn(() => [{
-        left: 100,
-        top: 100,
-        right: 200,
-        bottom: 150,
-        width: 100,
-        height: 50,
-        x: 100,
-        y: 100,
-        toJSON: () => ({}),
-      }] as unknown as DOMRectList)
-      return range
-    })
   }
 
   function getFirstTextNode(element: Element): Text {
@@ -92,13 +76,11 @@ describe("node translation", () => {
   })
 
   afterEach(() => {
-    document.createRange = originalCreateRange
     documentWithCaretPosition.caretPositionFromPoint = originalCaretPositionFromPoint
   })
 
   afterAll(() => {
     window.getComputedStyle = originalGetComputedStyle
-    document.createRange = originalCreateRange
     documentWithCaretPosition.caretPositionFromPoint = originalCaretPositionFromPoint
   })
   describe("show translation", () => {
